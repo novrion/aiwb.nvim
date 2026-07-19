@@ -1,13 +1,7 @@
 local M = {}
 local curl = require("plenary.curl")
 
-function M.call_gemini(prompt, context, filetype, config, callback)
-	local api_key = config.api_key
-	if not api_key or api_key == "" then
-		callback(nil, "GEMINI_API_KEY not set")
-		return
-	end
-
+local function build_prompts(prompt, context, filetype)
 	local system_prompt = string.format([[You are a concise coding assistant.
 - Respond with ONLY code if the user is explicitly asking for code, otherwise respond with ONLY brief comments.
 - Keep responses minimal and direct.
@@ -24,7 +18,7 @@ Comments rules:
 Context (current file):
 %s]], filetype, context.full_buffer)
 
-	local full_prompt = nil
+	local full_prompt
 	if not context.visual_selection or context.visual_selection == "" then
 		full_prompt = string.format("Code line user is on:\n```\n%s\n```\n\nRequest: %s",
 			context.current_line,
@@ -34,6 +28,17 @@ Context (current file):
 			context.visual_selection,
 			prompt)
 	end
+	return system_prompt, full_prompt
+end
+
+function M.call_gemini(prompt, context, filetype, config, callback)
+	local api_key = config.api_key
+	if not api_key or api_key == "" then
+		callback(nil, "GEMINI_API_KEY not set")
+		return
+	end
+
+	local system_prompt, full_prompt = build_prompts(prompt, context, filetype)
 
 	local url = string.format(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
@@ -62,6 +67,54 @@ Context (current file):
 			end
 			local text = data.candidates[1].content.parts[1].text or ""
 			callback(text, nil)
+		end)
+	})
+end
+
+function M.call_bedrock(prompt, context, filetype, config, callback)
+	local api_key = config.api_key
+	if not api_key or api_key == "" then
+		callback(nil, "BEDROCK_API_KEY not set")
+		return
+	end
+
+	local system_prompt, full_prompt = build_prompts(prompt, context, filetype)
+
+	local region = config.region or "us-east-1"
+	local model = config.model or "anthropic.claude-sonnet-4-6"
+	local url = string.format(
+		"https://bedrock-runtime.%s.amazonaws.com/model/%s/converse",
+		region,
+		model
+	)
+
+	local body = vim.fn.json_encode({
+		messages = { { role = "user", content = { { text = full_prompt } } } },
+		system = { { text = system_prompt } },
+	})
+
+	curl.post(url, {
+		body = body,
+		headers = {
+			["Content-Type"] = "application/json",
+			["Authorization"] = "Bearer " .. api_key,
+		},
+		callback = vim.schedule_wrap(function(response)
+			if response.status ~= 200 then
+				callback(nil, "API error: " .. (response.body or "unknown"))
+				return
+			end
+			local ok, data = pcall(vim.fn.json_decode, response.body)
+			if not ok or not data.output or not data.output.message then
+				callback(nil, "Failed to parse response")
+				return
+			end
+			local content = data.output.message.content
+			if not content or not content[1] or not content[1].text then
+				callback(nil, "Failed to parse response")
+				return
+			end
+			callback(content[1].text, nil)
 		end)
 	})
 end

@@ -3,6 +3,11 @@ local api = require("awb.api")
 local ui = require("awb.ui")
 local config = require("awb.config")
 
+local providers = {
+	gemini = api.call_gemini,
+	bedrock = api.call_bedrock,
+}
+
 function M.get_context()
 	local mode = vim.fn.mode()
 	local bufnr = vim.api.nvim_get_current_buf()
@@ -43,7 +48,9 @@ function M.ask()
 		-- start spinner at line under cursor
 		ui.start_spinner(bufnr, line)
 
-		api.call_gemini(prompt, context, filetype, config.get(), function(response, err)
+		local cfg = config.get()
+		local caller = providers[cfg.provider] or api.call_gemini
+		caller(prompt, context, filetype, cfg, function(response, err)
 			ui.stop_spinner()
 
 			if err then

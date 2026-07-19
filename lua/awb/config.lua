@@ -4,6 +4,7 @@ M.defaults = {
 	api_key = nil,
 	provider = "gemini",
 	model = "gemini-3-flash-preview",
+	region = "us-east-1",
 	keymaps = {
 		ask = { "<leader>a", { "n", "v" } },
 	},
